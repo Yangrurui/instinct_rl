@@ -287,6 +287,15 @@ class WasabiAlgoMixin:
         else:
             print("[Warning] The discriminator_optimizer state_dict is not found in the checkpoint")
 
+    def distributed_data_parallel(self):
+        super().distributed_data_parallel()
+        if dist.is_initialized():
+            rank = dist.get_rank()
+            if rank == 0:
+                print("[INFO] Broadcasting discriminator parameters from rank 0 to all processes.")
+            for param in self.discriminator.parameters():
+                dist.broadcast(param.data, src=0)
+
     def wasabi_gradient_step(self, loss: torch.Tensor, average_stats: dict):
         self.discriminator_optimizer.zero_grad()
         loss.backward()
