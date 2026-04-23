@@ -17,6 +17,7 @@ from .normalizer import (
     EmpiricalNormalization,
 )
 from .parallel_layer import ParallelLayer
+from .state_conditioned_depth_transformer import StateConditionedDepthTransformerHeadModel
 from .state_estimator import (
     EstimatorActorCritic,
     EstimatorActorCriticRecurrent,
