@@ -41,14 +41,16 @@ class FiLMBlock(nn.Module):
 
 
 class SpatialAttentionPool(nn.Module):
-    """Learned query attends over spatial positions, returns weighted feature vector."""
+    """Learned query attends over spatial positions via dot-product attention.
 
-    def __init__(self, feature_dim: int, hidden_dim: int = 64):
+    Query [1, C] computes similarity with every spatial position's feature vector,
+    producing a softmax weight map, then a weighted sum over spatial positions.
+    """
+
+    def __init__(self, feature_dim: int):
         super().__init__()
-        self.query = nn.Parameter(torch.zeros(1, 1, feature_dim))
+        self.query = nn.Parameter(torch.zeros(1, feature_dim))
         nn.init.normal_(self.query, std=0.02)
-        self.key_conv = nn.Conv2d(feature_dim, hidden_dim, 1)
-        self.attn_conv = nn.Conv2d(hidden_dim, 1, 1)
 
     def forward(self, feature_map: torch.Tensor) -> torch.Tensor:
         """Weighted spatial pooling.
@@ -59,11 +61,13 @@ class SpatialAttentionPool(nn.Module):
             [B, C]
         """
         B, C, H, W = feature_map.shape
-        keys = self.key_conv(feature_map)  # [B, hidden, H, W]
-        attn_logits = self.attn_conv(keys)  # [B, 1, H, W]
-        attn = attn_logits.flatten(2).softmax(dim=-1)  # [B, 1, H*W]
-        values = feature_map.flatten(2)  # [B, C, H*W]
-        pooled = torch.bmm(values, attn.transpose(1, 2)).squeeze(-1)  # [B, C]
+        # feature_map: [B, C, H, W] → [B, H*W, C]
+        tokens = feature_map.flatten(2).transpose(1, 2)  # [B, H*W, C]
+        # query: [1, C] → dot with every token → [B, H*W]
+        attn_logits = (tokens * self.query).sum(dim=-1)  # [B, H*W]
+        attn = attn_logits.softmax(dim=-1).unsqueeze(1)  # [B, 1, H*W]
+        # weighted sum over spatial dims
+        pooled = torch.bmm(attn, tokens).squeeze(1)  # [B, C]
         return pooled
 
 
@@ -124,9 +128,6 @@ class PerceptiveEncoder(nn.Module):
         # --- FiLM config ---
         film_hidden_dim: int = cfg.pop("film_hidden_dim", 64)
 
-        # --- Attention pool config ---
-        attn_hidden_dim: int = cfg.pop("attn_hidden_dim", 64)
-
         # --- MLP configs ---
         terrain_mlp_hidden: list = cfg.pop("terrain_mlp_hidden", [128])
         dynamics_mlp_hidden: list = cfg.pop("dynamics_mlp_hidden", [256, 128])
@@ -157,7 +158,7 @@ class PerceptiveEncoder(nn.Module):
         self.film = FiLMBlock(self._cnn_out_channels, dynamics_dim, film_hidden_dim)
 
         # ---- Spatial Attention Pool ----
-        self.attn_pool = SpatialAttentionPool(self._cnn_out_channels, attn_hidden_dim)
+        self.attn_pool = SpatialAttentionPool(self._cnn_out_channels)
 
         # ---- Terrain MLP ----
         t_mlp = []
