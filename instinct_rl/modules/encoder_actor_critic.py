@@ -34,7 +34,7 @@ class EncoderActorCriticMixin:
 
         self.encoder_configs = copy(encoder_configs)
         self.critic_encoder_configs = copy(critic_encoder_configs)
-        encoder_class_name = encoder_configs.pop("class_name", "ParallelLayer")
+        encoder_class_name = self.encoder_configs.pop("class_name", "ParallelLayer")
         EncoderClass = (
             getattr(importlib.import_module(encoder_class_name.split(":")[0]), encoder_class_name.split(":")[1])
             if ":" in encoder_class_name
@@ -49,7 +49,7 @@ class EncoderActorCriticMixin:
         elif self.critic_encoder_configs is None:
             critic_encoders = None
         else:
-            critic_encoder_class_name = critic_encoder_configs.pop("class_name", "ParallelLayer")
+            critic_encoder_class_name = self.critic_encoder_configs.pop("class_name", "ParallelLayer")
             CriticEncoderClass = (
                 getattr(
                     importlib.import_module(critic_encoder_class_name.split(":")[0]),
