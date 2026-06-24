@@ -5,6 +5,7 @@ import torch.optim as optim
 
 from instinct_rl.algorithms.ppo import PPO
 from instinct_rl.algorithms.tppo import TPPO
+from instinct_rl.algorithms.wasabi import WasabiPPO
 from instinct_rl.utils.utils import get_subobs_by_components, unpad_trajectories
 
 
@@ -60,3 +61,9 @@ class EstimatorPPO(EstimatorAlgoMixin, PPO):
 
 class EstimatorTPPO(EstimatorAlgoMixin, TPPO):
     pass
+
+
+class EstimatorWasabiPPO(EstimatorAlgoMixin, WasabiPPO):
+    def __init__(self, *args, estimator_loss_coef=1.0, **kwargs):
+        self.estimator_loss_coef = estimator_loss_coef
+        super().__init__(*args, **kwargs)

@@ -28,11 +28,13 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
-from .estimator import EstimatorPPO, EstimatorTPPO
+from .estimator import EstimatorPPO, EstimatorTPPO, EstimatorWasabiPPO
 from .lipschitz import LipschitzPPO
 from .ppo import PPO
 from .tppo import TPPO
 from .vae_distill import VaeDistill
+from .sac import SAC
+from .td3 import TD3
 from .wasabi import WasabiAlgoMixin, WasabiPPO
 
 
@@ -49,8 +51,11 @@ __all__ = [
     "TPPO",
     "EstimatorPPO",
     "EstimatorTPPO",
+    "EstimatorWasabiPPO",
     "LipschitzPPO",
     "VaeDistill",
+    "SAC",
+    "TD3",
     "WasabiPPO",
     "WasabiEstimatorPPO",
 ]

@@ -11,6 +11,7 @@ from .all_mixer import (
 )
 from .discriminator import Discriminator
 from .encoder_actor_critic import EncoderActorCritic, EncoderActorCriticRecurrent
+from .encoder_terrain_actor_critic import EncoderTerrainActorCritic
 from .moe_actor_critic import MoEActorCritic
 from .normalizer import (
     EmpiricalDiscountedVariationNormalization,
@@ -25,6 +26,8 @@ from .state_estimator import (
     EstimatorMixin,
 )
 from .vae_actor_critic import VaeActorCritic
+from .sac_actor_critic import SACActorCritic
+from .td3_actor_critic import TD3ActorCritic
 
 
 def build_actor_critic(
