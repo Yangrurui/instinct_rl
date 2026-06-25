@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import OrderedDict
 from copy import deepcopy
 from typing import Dict
@@ -96,11 +97,13 @@ class PerceptiveEncoder(nn.Module):
         self.input_segments = input_segments
         self._sequential_idx = sequential_idx
 
-        if len(block_configs) != 1:
+        block_items = list(block_configs.items())
+        if len(block_items) != 1:
             raise ValueError(
-                f"PerceptiveEncoder expects exactly one config block, got {len(block_configs)}"
+                f"PerceptiveEncoder expects exactly one config block, got {len(block_items)}"
             )
-        cfg = deepcopy(next(iter(block_configs.values())))
+        self._block_name, block_cfg = block_items[0]
+        cfg = deepcopy(block_cfg)
         cfg.pop("class_name", None)
 
         depth_component_names = cfg.pop("depth_component_names")
@@ -248,6 +251,36 @@ class PerceptiveEncoder(nn.Module):
                     )
                 )
         return torch.cat(outputs, dim=-1)
+
+    def export_as_onnx(
+        self,
+        flat_input: torch.Tensor,
+        filedir: str,
+        block_as_seperate_files: bool = True,
+    ) -> None:
+        """Export encoder ONNX (flat policy obs in, embedded obs out).
+
+        Matches :class:`ParallelLayer` export naming: ``{sequential_idx}-{block_name}.onnx``.
+        """
+        del block_as_seperate_files  # single fused block; kept for EncoderActorCritic API parity.
+        was_training = self.training
+        self.eval()
+        try:
+            with torch.no_grad():
+                exported_program = torch.onnx.export(
+                    self,
+                    (flat_input,),
+                    "/tmp/perceptive_encoder.onnx",
+                    input_names=["input"],
+                    output_names=["output"],
+                    dynamo=True,
+                    opset_version=18,
+                )
+            export_path = os.path.join(filedir, f"{self._sequential_idx}-{self._block_name}.onnx")
+            exported_program.save(export_path)
+            print(f"Exported PerceptiveEncoder to {export_path}")
+        finally:
+            self.train(was_training)
 
     def __str__(self):
         return (
