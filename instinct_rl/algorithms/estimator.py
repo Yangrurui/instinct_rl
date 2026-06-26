@@ -48,7 +48,7 @@ class EstimatorAlgoMixin:
             estimation_target,
             **self.estimator_loss_kwargs,
             reduction="none",
-        ).sum(dim=-1)
+        ).mean(dim=-1)
 
         losses["estimator_loss"] = estimator_loss.mean()
 
