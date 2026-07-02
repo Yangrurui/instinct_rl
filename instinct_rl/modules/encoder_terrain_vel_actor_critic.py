@@ -1,7 +1,7 @@
 """EncoderTerrainVelActorCritic: depth encoder + terrain head + proprio velocity estimator.
 
-HIMLoco/DreamWaQ-style: a feed-forward estimator predicts the base linear velocity from the
-proprioceptive history and injects the detached estimate into the actor observation, so the
+HIMLoco/DreamWaQ-style: a feed-forward estimator predicts the current base linear velocity (3-dim)
+from proprioceptive history and injects the detached estimate into the actor observation, so the
 actor consumes an explicit velocity feature that at deploy time is produced from proprioception
 alone. The estimate is supervised against the privileged critic velocity by EstimatorWasabiPPO.
 The terrain head reconstructs the privileged height map from the depth latent (auxiliary).
