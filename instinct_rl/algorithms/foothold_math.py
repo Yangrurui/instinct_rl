@@ -1,8 +1,9 @@
 """SSR 式2（支撑缺失度 rho）/ 式3（引导 reward）的纯张量实现。
 
-区域高度图约定：height_scan 输出的每个 ray 是命中点世界高度 z，按行主序 reshape 成
-(H, W) 网格；网格中心对齐足部扫描 site（即当前脚 xy）。sole patch 是网格中心处一块
-SOLE_H x SOLE_W 的子窗口；对想象点，用中心相对偏移取子窗口。
+区域高度图约定：每个 ray 存的是命中点【世界绝对高度 z】（由 foot_region_hit_z 观测提供），
+按 mjlab GridPattern(meshgrid indexing="xy") 的行主序 reshape 成 (H, W)=(ny, nx) 网格，
+即【行=y(左右)、列=x(前后)】；网格中心对齐足部扫描 site（当前脚 xy）。sole patch 是
+网格中心处一块 (SOLE_H, SOLE_W) 子窗口；对想象点，用中心相对偏移取子窗口。
 """
 
 import torch
@@ -28,7 +29,7 @@ def _sole_patch(region_hw: torch.Tensor, center_ij: torch.Tensor, sole_grid) -> 
 
 
 def _deficiency(patch: torch.Tensor, sole_z: torch.Tensor, epsilon_h: float) -> torch.Tensor:
-    # rho = 1 - mean_k 1[sole_z - h_k < epsilon_h]
+    # rho = 1 - mean_k 1[sole_z - h_k < epsilon_h]，h_k=命中点世界绝对高度 z
     supported = (sole_z.unsqueeze(-1) - patch < epsilon_h).float()
     return 1.0 - supported.mean(dim=-1)
 
@@ -44,12 +45,12 @@ def support_deficiency_at_center(scan, sole_z, region_grid, region_res, sole_gri
 
 def support_deficiency_at_point(scan, offset_xy, region_grid, region_res, sole_grid, epsilon_h):
     """想象点：patch 中心 = 网格中心 + offset_xy(米, scanner 系)。
-    scan:(N,H*W), offset_xy:(N,2). sole_z 用 patch 内最大高度（SSR: h^f=max_k h_k）。"""
+    scan:(N,H*W), offset_xy:(N,2)=[x,y]. sole_z 用 patch 内最大高度（SSR: h^f=max_k h_k）。
+    网格【行=y、列=x】：x 偏移->列(dj)，y 偏移->行(di)。"""
     region_hw = _reshape_region(scan, region_grid)
     N, H, W = region_hw.shape
-    # 网格行=x(前后)、列=y(左右)：以行主序为 (i沿x, j沿y)。offset->格数
-    di = torch.round(offset_xy[:, 0] / region_res).long()
-    dj = torch.round(offset_xy[:, 1] / region_res).long()
+    di = torch.round(offset_xy[:, 1] / region_res).long()             # y -> 行
+    dj = torch.round(offset_xy[:, 0] / region_res).long()             # x -> 列
     center = torch.stack([H // 2 + di, W // 2 + dj], dim=-1).clamp(
         torch.tensor([0, 0], device=scan.device),
         torch.tensor([H - 1, W - 1], device=scan.device))

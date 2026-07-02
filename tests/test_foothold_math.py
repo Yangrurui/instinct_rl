@@ -3,8 +3,8 @@ from instinct_rl.algorithms.foothold_math import (
     support_deficiency_at_center, expected_support_deficiency, guidance_reward,
 )
 
-REGION_H, REGION_W, REGION_RES = 21, 13, 0.025
-SOLE_H, SOLE_W = 10, 5
+REGION_H, REGION_W, REGION_RES = 13, 21, 0.025
+SOLE_H, SOLE_W = 5, 10
 EPS_H = 0.03
 
 
