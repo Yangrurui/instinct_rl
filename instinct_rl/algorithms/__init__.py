@@ -35,6 +35,7 @@ from .tppo import TPPO
 from .vae_distill import VaeDistill
 # from .sac import SAC
 # from .td3 import TD3
+from .foothold import FootholdAlgoMixin
 from .wasabi import WasabiAlgoMixin, WasabiPPO
 
 
@@ -42,6 +43,14 @@ class WasabiEstimatorPPO(WasabiAlgoMixin, EstimatorPPO):
     """Considering wasabi/discriminator update is outside of the PPO loss and update, we inherit
     WasabiAlgoMixin before EstimatorMixin.
     """
+
+    pass
+
+
+class FootholdWasabiEstimatorPPO(FootholdAlgoMixin, WasabiEstimatorPPO):
+    """SSR: AMP + 速度/地形估计 + imagined foothold guidance。
+    MRO: Foothold -> Wasabi -> Estimator -> PPO，保证各自的
+    process_env_step/compute_auxiliary_reward/update/state_dict 沿 super 链正确叠加。"""
 
     pass
 
@@ -58,4 +67,6 @@ __all__ = [
     "TD3",
     "WasabiPPO",
     "WasabiEstimatorPPO",
+    "FootholdAlgoMixin",
+    "FootholdWasabiEstimatorPPO",
 ]
