@@ -13,6 +13,7 @@ from .discriminator import Discriminator
 from .encoder_actor_critic import EncoderActorCritic, EncoderActorCriticRecurrent
 from .encoder_terrain_actor_critic import EncoderTerrainActorCritic
 from .encoder_terrain_vel_actor_critic import EncoderTerrainVelActorCritic
+from .foothold_imagination import FootholdImaginationModel
 from .moe_actor_critic import MoEActorCritic
 from .normalizer import (
     EmpiricalDiscountedVariationNormalization,
