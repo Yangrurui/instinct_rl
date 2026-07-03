@@ -47,6 +47,12 @@ class WasabiEstimatorPPO(WasabiAlgoMixin, EstimatorPPO):
     pass
 
 
+class FootholdWasabiPPO(FootholdAlgoMixin, WasabiPPO):
+    """SSR: AMP + imagined foothold guidance, without policy-side estimator heads."""
+
+    pass
+
+
 class FootholdWasabiEstimatorPPO(FootholdAlgoMixin, WasabiEstimatorPPO):
     """SSR: AMP + 速度/地形估计 + imagined foothold guidance。
     MRO: Foothold -> Wasabi -> Estimator -> PPO，保证各自的
@@ -68,5 +74,6 @@ __all__ = [
     "WasabiPPO",
     "WasabiEstimatorPPO",
     "FootholdAlgoMixin",
+    "FootholdWasabiPPO",
     "FootholdWasabiEstimatorPPO",
 ]

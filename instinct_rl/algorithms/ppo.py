@@ -61,6 +61,7 @@ class PPO:
         schedule="fixed",
         desired_kl=0.01,
         auxiliary_reward_per_env_reward_coefs: list[float] = list(),
+        auxiliary_reward_per_env_reward_coefs_by_key: dict[str, list[float]] | None = None,
         device="cpu",
         **kwargs,
     ):
@@ -69,6 +70,7 @@ class PPO:
         Args:
             auxiliary_reward_per_env_reward_coefs: list of float, the coefficients for each of the auxiliary reward.
                 The length of the list should be the same as the number of rewards from the environment (in case of multi-critic setting).
+            auxiliary_reward_per_env_reward_coefs_by_key: optional per auxiliary reward routing coefficients.
         """
         if kwargs:
             print("\033[43;33mWarning: PPO init got extra kwargs:", kwargs.keys(), "\033[0m")
@@ -82,6 +84,10 @@ class PPO:
             if len(auxiliary_reward_per_env_reward_coefs) > 0
             else 1.0
         )
+        self.auxiliary_reward_per_env_reward_coefs_by_key = {
+            k: torch.tensor(v, device=self.device).unsqueeze(0)
+            for k, v in (auxiliary_reward_per_env_reward_coefs_by_key or {}).items()
+        }
         # PPO components
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
@@ -118,6 +124,7 @@ class PPO:
         self.transition = RolloutStorage.Transition()
         obs_size = get_subobs_size(obs_format["policy"])
         critic_obs_size = get_subobs_size(obs_format.get("critic")) if "critic" in obs_format else None
+        self._validate_auxiliary_reward_coefs(num_rewards)
         self.storage = RolloutStorage(
             num_envs,
             num_transitions_per_env,
@@ -127,6 +134,22 @@ class PPO:
             num_rewards=num_rewards,
             device=self.device,
         )
+
+    def _validate_auxiliary_reward_coefs(self, num_rewards: int):
+        if isinstance(self.auxiliary_reward_per_env_reward_coefs, torch.Tensor):
+            n = self.auxiliary_reward_per_env_reward_coefs.shape[-1]
+            if n != num_rewards:
+                raise ValueError(
+                    "auxiliary_reward_per_env_reward_coefs length "
+                    f"({n}) must match num_rewards ({num_rewards})."
+                )
+        for reward_name, reward_coefs in self.auxiliary_reward_per_env_reward_coefs_by_key.items():
+            n = reward_coefs.shape[-1]
+            if n != num_rewards:
+                raise ValueError(
+                    f"auxiliary_reward_per_env_reward_coefs_by_key[{reward_name!r}] length "
+                    f"({n}) must match num_rewards ({num_rewards})."
+                )
 
     def test_mode(self):
         self.actor_critic.test()
@@ -148,6 +171,11 @@ class PPO:
         self.transition.critic_observations = critic_obs
         return self.transition.actions
 
+    def _auxiliary_reward_env_reward_coefs(self, reward_name: str):
+        if reward_name in self.auxiliary_reward_per_env_reward_coefs_by_key:
+            return self.auxiliary_reward_per_env_reward_coefs_by_key[reward_name]
+        return self.auxiliary_reward_per_env_reward_coefs
+
     def process_env_step(self, rewards, dones, infos, next_obs, next_critic_obs):
         self.transition.rewards = rewards.clone()
 
@@ -159,7 +187,8 @@ class PPO:
             )  # This coef is per-auxiliary wise, will apply to all the rewards (if multiple rewards from the environment)
             if coef != 0.0:
                 # (num_envs, num_rewards) = scalar * (num_envs, num_rewards) * (1, num_rewards)
-                self.transition.rewards += coef * v * self.auxiliary_reward_per_env_reward_coefs
+                reward_coefs = self._auxiliary_reward_env_reward_coefs(k)
+                self.transition.rewards += coef * v * reward_coefs
             # Add the auxiliary rewards to info
             infos["step"][k] = v
 

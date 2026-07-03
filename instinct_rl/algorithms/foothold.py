@@ -69,6 +69,36 @@ class FootholdAlgoMixin:
     def _imagination_input(self, fh):
         return self._fh_slice(fh, self.imagination_feature_components)
 
+    @staticmethod
+    def _base_xy_to_world(base_pose_w, xy_b):
+        yaw = base_pose_w[:, 2]
+        cos_yaw = torch.cos(yaw).unsqueeze(-1)
+        sin_yaw = torch.sin(yaw).unsqueeze(-1)
+        xy_w = torch.empty_like(xy_b)
+        xy_w[..., 0] = base_pose_w[:, 0:1] + cos_yaw * xy_b[..., 0] - sin_yaw * xy_b[..., 1]
+        xy_w[..., 1] = base_pose_w[:, 1:2] + sin_yaw * xy_b[..., 0] + cos_yaw * xy_b[..., 1]
+        return xy_w
+
+    @torch.no_grad()
+    def compute_foothold_imagination_visualization(self, obs_pack):
+        fh = obs_pack[self.foothold_state_key]
+        feat = self._imagination_input(fh)
+        mu, log_sigma = self.imagination(feat)
+
+        base_pose_w = self._fh_slice(fh, ["base_pose_w"])
+        foot_sole_z = self._fh_slice(fh, ["foot_sole_z"]).view(-1, 2)
+        level = self._fh_slice(fh, ["terrain_level"]).squeeze(-1)
+
+        xy_w = self._base_xy_to_world(base_pose_w, mu)
+        z_w = foot_sole_z.unsqueeze(-1) + 0.08
+        points_w = torch.cat([xy_w, z_w], dim=-1)
+
+        return {
+            "points_w": points_w.detach(),
+            "sigma": torch.exp(log_sigma).detach(),
+            "terrain_gate": (level >= self.terrain_level_gate).detach(),
+        }
+
     def process_env_step(self, rewards, dones, infos, next_obs, next_critic_obs):
         fh = infos["observations"][self.foothold_state_key]
         self.foothold_transition.feat = self._imagination_input(fh).clone()
