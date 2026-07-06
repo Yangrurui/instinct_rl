@@ -2,7 +2,7 @@ import os
 from collections import OrderedDict
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -10,6 +10,7 @@ import torch.nn as nn
 
 from instinct_rl.modules.conv2d import Conv2dHeadModel
 from instinct_rl.modules.depth_proprio_gru_encoder import DepthProprioGruEncoder
+from instinct_rl.modules.depth_proprio_recurrent_gru_encoder import DepthProprioRecurrentGruEncoder
 from instinct_rl.modules.mlp import MlpModel
 from instinct_rl.modules.state_conditioned_depth_transformer import (
   StateConditionedDepthTransformerHeadModel,
@@ -62,6 +63,28 @@ class ParallelLayer(nn.Module):
     self.build_blocks()
     self.build_output_segment()
 
+  @property
+  def is_recurrent(self) -> bool:
+    return any(getattr(block, "is_recurrent", False) for block in self._parallel_blocks.values())
+
+  @property
+  def recurrent_block_name(self) -> Optional[str]:
+    for block_name, block in self._parallel_blocks.items():
+      if getattr(block, "is_recurrent", False):
+        return block_name
+    return None
+
+  def get_hidden_states(self):
+    block_name = self.recurrent_block_name
+    if block_name is None:
+      return None
+    return self._parallel_blocks[block_name].hidden_states
+
+  def reset(self, dones=None):
+    for block in self._parallel_blocks.values():
+      if hasattr(block, "reset"):
+        block.reset(dones)
+
   def build_blocks(self):
     """Build all encoders one by one."""
     self._parallel_blocks = nn.ModuleDict()
@@ -87,6 +110,19 @@ class ParallelLayer(nn.Module):
         depth_shape=depth_shape,
         proprio_dim=proprio_dim,
         proprio_seq_len=proprio_seq_len,
+        output_size=output_size,
+        **model_kwargs,
+      )
+
+    if model_class_name == "DepthProprioRecurrentGruEncoder":
+      model_kwargs.pop("component_names", None)
+      depth_component_names = model_kwargs.pop("depth_component_names")
+      proprio_component_names = model_kwargs.pop("proprio_component_names")
+      depth_shape = input_segments[depth_component_names[0]]
+      proprio_dim = sum(int(input_segments[name][-1]) for name in proprio_component_names)
+      return DepthProprioRecurrentGruEncoder(
+        depth_shape=depth_shape,
+        proprio_dim=proprio_dim,
         output_size=output_size,
         **model_kwargs,
       )
@@ -165,16 +201,24 @@ class ParallelLayer(nn.Module):
     self.numel_output = get_subobs_size(self.output_segment)
     return self.output_segment
 
-  def run_blocks(self, flat_input: torch.Tensor) -> torch.Tensor:
+  def run_blocks(
+    self,
+    flat_input: torch.Tensor,
+    masks=None,
+    hidden_states=None,
+  ) -> torch.Tensor:
     """Run all blocks in parallel and contact the flattened output."""
     blocks_outputs = OrderedDict()
     leading_dim = flat_input.shape[:-1]
     for block_name, block in self._parallel_blocks.items():
+      block_hidden = hidden_states if getattr(block, "is_recurrent", False) else None
       blocks_outputs[self._output_component_name_prefix + block_name] = self._run_one_block(
         flat_input,
         self.input_segments,
         block_name,
         block,
+        masks=masks,
+        hidden_states=block_hidden,
       )
     outputs = []
     for output_component_name, output_shape in self.output_segment.items():
@@ -188,7 +232,15 @@ class ParallelLayer(nn.Module):
         )
     return torch.cat(outputs, dim=-1)
 
-  def _run_one_block(self, flat_input, input_segments, block_name, block):
+  def _run_one_block(
+    self,
+    flat_input,
+    input_segments,
+    block_name,
+    block,
+    masks=None,
+    hidden_states=None,
+  ):
     block_config = self.block_configs[block_name]
     input_names = _get_block_component_names(block_config)
 
@@ -221,6 +273,26 @@ class ParallelLayer(nn.Module):
       )
       return block(depth, proprio_history)
 
+    if module_is_from_type(block, DepthProprioRecurrentGruEncoder):
+      depth_name = block_config["depth_component_names"][0]
+      depth = get_subobs_by_components(
+        flat_input,
+        block_config["depth_component_names"],
+        input_segments,
+      )
+      proprio = get_subobs_by_components(
+        flat_input,
+        block_config["proprio_component_names"],
+        input_segments,
+      )
+      batch_mode = hidden_states is not None
+      if batch_mode:
+        leading = flat_input.shape[:-1]
+        depth = depth.reshape(*leading, *input_segments[depth_name])
+      else:
+        depth = depth.reshape(-1, *input_segments[depth_name])
+      return block(depth, proprio, masks=masks, hidden_states=hidden_states)
+
     is_transformer_block = module_is_from_type(block, TransformerHeadModel)
     input_for_block = get_subobs_by_components(
         flat_input,
@@ -237,9 +309,13 @@ class ParallelLayer(nn.Module):
   Torch module related methods
   """
 
-  def forward(self, flat_input: torch.Tensor) -> torch.Tensor:
-    """TODO: support rnn block."""
-    return self.run_blocks(flat_input)
+  def forward(
+    self,
+    flat_input: torch.Tensor,
+    masks=None,
+    hidden_states=None,
+  ) -> torch.Tensor:
+    return self.run_blocks(flat_input, masks=masks, hidden_states=hidden_states)
 
   def __str__(self):
     return f"ParallelLayer({len(self.block_configs)} blocks): {self._parallel_blocks}"
@@ -303,6 +379,20 @@ class ParallelLayer(nn.Module):
       )
       export_args = (depth, proprio_history)
       input_names = ("depth", "proprio_history")
+    elif module_is_from_type(block, DepthProprioRecurrentGruEncoder):
+      depth_name = block_config["depth_component_names"][0]
+      depth = get_subobs_by_components(
+        flat_input,
+        block_config["depth_component_names"],
+        self.input_segments,
+      ).reshape(-1, *self.input_segments[depth_name])
+      proprio = get_subobs_by_components(
+        flat_input,
+        block_config["proprio_component_names"],
+        self.input_segments,
+      )
+      export_args = (depth, proprio)
+      input_names = ("depth", "proprio")
     else:
       input_names_list = _get_block_component_names(block_config)
       is_transformer_block = module_is_from_type(block, TransformerHeadModel)

@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 
 import instinct_rl.modules as instinct_modules
+from instinct_rl.utils import unpad_trajectories
 from instinct_rl.utils.utils import get_subobs_size
 
 
@@ -145,8 +146,53 @@ class EncoderActorCritic(EncoderActorCriticMixin, ActorCritic):
     pass
 
 
-from .actor_critic_recurrent import ActorCriticRecurrent
+from .actor_critic_recurrent import ActorCriticHiddenState, ActorCriticRecurrent
 
 
 class EncoderActorCriticRecurrent(EncoderActorCriticMixin, ActorCriticRecurrent):
     pass
+
+
+class EncoderRecurrentActorCritic(EncoderActorCriticMixin, ActorCritic):
+    """Encoder actor-critic with cross-step recurrent encoder (GRU inside encoder block)."""
+
+    is_recurrent = True
+
+    def reset(self, dones=None):
+        self.encoders.reset(dones)
+
+    def act(self, observations, masks=None, hidden_states=None):
+        if masks is not None:
+            # Update phase: ppo passes the actor hidden-state tensor directly (minibatch.hidden_states.actor),
+            # not the namedarraytuple. Keep masks out of the encoder so the inner Memory returns padded
+            # [T, num_traj, H]; unpad exactly once here at the AC level before the actor MLP.
+            obs = self.encoders(observations, masks=None, hidden_states=hidden_states)
+            obs = unpad_trajectories(obs, masks)
+        else:
+            obs = self.encoders(observations)
+        # Call the backbone directly: super() resolves to EncoderActorCriticMixin.act, which would
+        # re-run self.encoders on the already-encoded latent. Go straight to ActorCritic to encode once.
+        return ActorCritic.act(self, obs)
+
+    def act_inference(self, observations):
+        obs = self.encoders(observations)
+        return ActorCritic.act_inference(self, obs)
+
+    def evaluate(self, critic_observations, masks=None, hidden_states=None):
+        batch_mode = masks is not None
+        if self.critic_encoders is not None:
+            obs = self.critic_encoders(critic_observations)
+        else:
+            obs = critic_observations
+        if batch_mode:
+            obs = unpad_trajectories(obs, masks)
+        return ActorCritic.evaluate(self, obs)
+
+    def get_hidden_states(self):
+        actor_hidden = self.encoders.get_hidden_states()
+        # Before the first rnn step Memory.hidden_states is None; return None fields so rollout
+        # storage's _save_hidden_states skips saving (matches ActorCriticRecurrent behavior).
+        if actor_hidden is None:
+            return ActorCriticHiddenState(actor=None, critic=None)
+        # Critic uses a stateless encoder; storage only needs a non-None placeholder to keep both fields set.
+        return ActorCriticHiddenState(actor=actor_hidden, critic=actor_hidden.clone())

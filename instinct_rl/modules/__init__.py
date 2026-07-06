@@ -10,7 +10,13 @@ from .all_mixer import (
     EncoderVaeActorCritic,
 )
 from .discriminator import Discriminator
-from .encoder_actor_critic import EncoderActorCritic, EncoderActorCriticRecurrent
+from .depth_proprio_gru_encoder import DepthProprioGruEncoder
+from .depth_proprio_recurrent_gru_encoder import DepthProprioRecurrentGruEncoder
+from .encoder_actor_critic import (
+    EncoderActorCritic,
+    EncoderActorCriticRecurrent,
+    EncoderRecurrentActorCritic,
+)
 from .encoder_terrain_actor_critic import EncoderTerrainActorCritic
 from .encoder_terrain_vel_actor_critic import EncoderTerrainVelActorCritic
 from .foothold_imagination import FootholdImaginationModel
@@ -21,7 +27,6 @@ from .normalizer import (
 )
 from .parallel_layer import ParallelLayer
 from .perceptive_encoder import PerceptiveEncoder
-from .depth_proprio_gru_encoder import DepthProprioGruEncoder
 from .state_conditioned_depth_transformer import StateConditionedDepthTransformerHeadModel
 from .state_estimator import (
     EstimatorActorCritic,
