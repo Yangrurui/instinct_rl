@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 
 from instinct_rl.modules.conv2d import Conv2dHeadModel
+from instinct_rl.modules.depth_proprio_gru_encoder import DepthProprioGruEncoder
 from instinct_rl.modules.mlp import MlpModel
 from instinct_rl.modules.state_conditioned_depth_transformer import (
   StateConditionedDepthTransformerHeadModel,
@@ -22,8 +23,10 @@ from instinct_rl.utils.utils import (
 
 
 def _get_block_component_names(config: dict) -> List[str]:
-  if "component_names" in config:
+  if config.get("component_names"):
     return list(config["component_names"])
+  if "depth_component_names" in config and "proprio_component_names" in config:
+    return list(config["depth_component_names"]) + list(config["proprio_component_names"])
   visual = list(config.get("visual_component_names", []))
   state = list(config.get("state_component_names", []))
   return visual + state
@@ -126,6 +129,19 @@ class ParallelLayer(nn.Module):
           "StateConditionedDepthTransformerHeadModel block_config must set "
           "visual_component_names and state_component_names"
         )
+    elif model_class_name == "DepthProprioGruEncoder":
+      depth_component_names = model_kwargs.pop("depth_component_names")
+      proprio_component_names = model_kwargs.pop("proprio_component_names")
+      depth_shape = input_segments[depth_component_names[0]]
+      proprio_seq_len = int(input_segments[proprio_component_names[0]][0])
+      proprio_dim = sum(int(input_segments[name][-1]) for name in proprio_component_names)
+      model = DepthProprioGruEncoder(
+        depth_shape=depth_shape,
+        proprio_dim=proprio_dim,
+        proprio_seq_len=proprio_seq_len,
+        output_size=output_size,
+        **model_kwargs,
+      )
     else:
       model = None  # leave for subclass to implement
     return model
@@ -187,6 +203,21 @@ class ParallelLayer(nn.Module):
         input_segments,
       )
       return block(depth, state)
+
+    if module_is_from_type(block, DepthProprioGruEncoder):
+      depth_name = block_config["depth_component_names"][0]
+      depth = get_subobs_by_components(
+        flat_input,
+        block_config["depth_component_names"],
+        input_segments,
+      ).reshape(-1, *input_segments[depth_name])
+      proprio_history = get_subobs_by_components(
+        flat_input,
+        block_config["proprio_component_names"],
+        input_segments,
+        temporal=True,
+      )
+      return block(depth, proprio_history)
 
     is_transformer_block = module_is_from_type(block, TransformerHeadModel)
     input_for_block = get_subobs_by_components(
@@ -255,6 +286,21 @@ class ParallelLayer(nn.Module):
       )
       export_args = (depth, state)
       input_names = ("depth", "state")
+    elif module_is_from_type(block, DepthProprioGruEncoder):
+      depth_name = block_config["depth_component_names"][0]
+      depth = get_subobs_by_components(
+        flat_input,
+        block_config["depth_component_names"],
+        self.input_segments,
+      ).reshape(-1, *self.input_segments[depth_name])
+      proprio_history = get_subobs_by_components(
+        flat_input,
+        block_config["proprio_component_names"],
+        self.input_segments,
+        temporal=True,
+      )
+      export_args = (depth, proprio_history)
+      input_names = ("depth", "proprio_history")
     else:
       input_names_list = _get_block_component_names(block_config)
       is_transformer_block = module_is_from_type(block, TransformerHeadModel)

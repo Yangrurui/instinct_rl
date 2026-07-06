@@ -21,6 +21,7 @@ from .normalizer import (
 )
 from .parallel_layer import ParallelLayer
 from .perceptive_encoder import PerceptiveEncoder
+from .depth_proprio_gru_encoder import DepthProprioGruEncoder
 from .state_conditioned_depth_transformer import StateConditionedDepthTransformerHeadModel
 from .state_estimator import (
     EstimatorActorCritic,
