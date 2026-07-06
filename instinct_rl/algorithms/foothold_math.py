@@ -59,18 +59,42 @@ def support_deficiency_at_point(scan, offset_xy, region_grid, region_res, sole_g
     return _deficiency(patch, sole_z, epsilon_h)
 
 
+def _gauss_hermite_grid(num_nodes: int, *, device, dtype):
+    if num_nodes < 1:
+        raise ValueError(f"num_samples must be positive, got {num_nodes}.")
+    if num_nodes == 1:
+        nodes_1d = torch.zeros(1, device=device, dtype=dtype)
+        weights_1d = torch.ones(1, device=device, dtype=dtype)
+    else:
+        beta = torch.sqrt(
+            torch.arange(1, num_nodes, device=device, dtype=dtype) / 2.0
+        )
+        jacobi = torch.diag(beta, diagonal=1) + torch.diag(beta, diagonal=-1)
+        nodes_1d, eigvecs = torch.linalg.eigh(jacobi)
+        weights_1d = eigvecs[0].square()
+
+    # Gauss-Hermite integrates e^{-x^2}. For N(0, 1), use sqrt(2) * nodes and
+    # normalize 2-D product weights by pi, which equals sum(product weights).
+    grid_y, grid_x = torch.meshgrid(nodes_1d, nodes_1d, indexing="ij")
+    weight_y, weight_x = torch.meshgrid(weights_1d, weights_1d, indexing="ij")
+    eps = torch.stack((grid_x.reshape(-1), grid_y.reshape(-1)), dim=-1) * (2.0 ** 0.5)
+    weights = (weight_x * weight_y).reshape(-1)
+    return eps, weights / weights.sum()
+
+
 def expected_support_deficiency(scan, mu_xy, log_sigma, region_grid, region_res,
                                 sole_grid, epsilon_h, num_samples: int = 8):
-    """摆动脚：E_{p~N(mu,sigma^2 I)}[rho(p)]，离散高斯采样近似（SSR 式3）。
-    mu_xy:(N,2) scanner 系相对偏移；log_sigma:(N,)."""
+    """摆动脚：E_{p~N(mu,sigma^2 I)}[rho(p)]，离散高斯加权采样近似（SSR 式3）。
+    mu_xy:(N,2) scanner 系相对偏移；log_sigma:(N,). num_samples 是每轴 Gauss-Hermite 节点数。"""
     sigma = torch.exp(log_sigma).unsqueeze(-1)                         # (N,1)
-    eps = torch.randn(mu_xy.shape[0], num_samples, 2, device=scan.device)
-    samples = mu_xy.unsqueeze(1) + sigma.unsqueeze(-1) * eps           # (N,S,2)
+    eps, weights = _gauss_hermite_grid(num_samples, device=scan.device, dtype=scan.dtype)
+    samples = mu_xy.unsqueeze(1) + sigma.unsqueeze(-1) * eps.view(1, -1, 2)
     rho = []
-    for s in range(num_samples):
+    for s in range(samples.shape[1]):
         rho.append(support_deficiency_at_point(
             scan, samples[:, s, :], region_grid, region_res, sole_grid, epsilon_h))
-    return torch.stack(rho, dim=-1).mean(dim=-1)                       # (N,)
+    rho_samples = torch.stack(rho, dim=-1)                             # (N, S)
+    return torch.sum(rho_samples * weights.view(1, -1), dim=-1)        # (N,)
 
 
 def guidance_reward(rho_tilde: torch.Tensor, sigma_f: float) -> torch.Tensor:
