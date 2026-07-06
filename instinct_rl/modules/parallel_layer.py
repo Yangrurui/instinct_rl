@@ -76,6 +76,21 @@ class ParallelLayer(nn.Module):
     output_size = model_kwargs.pop("output_size")
     model_kwargs.pop("takeout_input_components")
 
+    if model_class_name == "DepthProprioGruEncoder":
+      model_kwargs.pop("component_names", None)
+      depth_component_names = model_kwargs.pop("depth_component_names")
+      proprio_component_names = model_kwargs.pop("proprio_component_names")
+      depth_shape = input_segments[depth_component_names[0]]
+      proprio_seq_len = int(input_segments[proprio_component_names[0]][0])
+      proprio_dim = sum(int(input_segments[name][-1]) for name in proprio_component_names)
+      return DepthProprioGruEncoder(
+        depth_shape=depth_shape,
+        proprio_dim=proprio_dim,
+        proprio_seq_len=proprio_seq_len,
+        output_size=output_size,
+        **model_kwargs,
+      )
+
     # Base `InstinctRlParallelBlockCfg` always serializes `component_names` (often `[]`). Treat empty
     # as "unset" so visual/state split blocks still pop their keys before **model_kwargs.
     component_names = model_kwargs.pop("component_names", None)
@@ -129,19 +144,6 @@ class ParallelLayer(nn.Module):
           "StateConditionedDepthTransformerHeadModel block_config must set "
           "visual_component_names and state_component_names"
         )
-    elif model_class_name == "DepthProprioGruEncoder":
-      depth_component_names = model_kwargs.pop("depth_component_names")
-      proprio_component_names = model_kwargs.pop("proprio_component_names")
-      depth_shape = input_segments[depth_component_names[0]]
-      proprio_seq_len = int(input_segments[proprio_component_names[0]][0])
-      proprio_dim = sum(int(input_segments[name][-1]) for name in proprio_component_names)
-      model = DepthProprioGruEncoder(
-        depth_shape=depth_shape,
-        proprio_dim=proprio_dim,
-        proprio_seq_len=proprio_seq_len,
-        output_size=output_size,
-        **model_kwargs,
-      )
     else:
       model = None  # leave for subclass to implement
     return model
