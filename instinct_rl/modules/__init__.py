@@ -19,6 +19,7 @@ from .encoder_actor_critic import (
 )
 from .encoder_terrain_actor_critic import EncoderTerrainActorCritic
 from .encoder_terrain_vel_actor_critic import EncoderTerrainVelActorCritic
+from .encoder_vel_actor_critic import EncoderVelActorCritic
 from .foothold_imagination import FootholdImaginationModel
 from .moe_actor_critic import MoEActorCritic
 from .normalizer import (
