@@ -158,6 +158,10 @@ class ActorCritic(nn.Module):
 
     def update_distribution(self, observations):
         mean = self.actor(observations)
+        # One non-finite mean would raise in Normal() and abort training; sanitize and flag so PPO can skip.
+        self._action_mean_invalid = not torch.isfinite(mean).all()
+        if self._action_mean_invalid:
+            mean = torch.nan_to_num(mean, nan=0.0, posinf=0.0, neginf=0.0)
         self.distribution = Normal(mean, mean * 0.0 + self.std)
 
     def act(self, observations, **kwargs):

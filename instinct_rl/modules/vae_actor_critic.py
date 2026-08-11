@@ -114,6 +114,10 @@ class VaeActorCritic(ActorCritic):
     def update_distribution(self, observations):
         decoded, distribution = self._run_actor(observations)
         self.latent_distribution = distribution
+        # Same non-finite guard as ActorCritic so PPO can skip poisoned minibatches.
+        self._action_mean_invalid = not torch.isfinite(decoded).all()
+        if self._action_mean_invalid:
+            decoded = torch.nan_to_num(decoded, nan=0.0, posinf=0.0, neginf=0.0)
         self.distribution = dist.Normal(decoded, decoded * 0.0 + self.std)
 
     def act_inference(self, observations):

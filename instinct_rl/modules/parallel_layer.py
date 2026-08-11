@@ -81,6 +81,8 @@ class ParallelLayer(nn.Module):
     component_names = model_kwargs.pop("component_names", None)
     if component_names:
       input_names = list(component_names)
+    elif "depth_component_names" in config and "proprio_component_names" in config:
+      input_names = list(config["depth_component_names"]) + list(config["proprio_component_names"])
     else:
       visual_names = model_kwargs.pop("visual_component_names")
       state_names = model_kwargs.pop("state_component_names")

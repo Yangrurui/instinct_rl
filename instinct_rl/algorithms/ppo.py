@@ -221,12 +221,28 @@ class PPO:
             generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
             generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        num_updates = 0
+        num_skipped = 0
         for minibatch in generator:
             losses, _, stats = self.compute_losses(minibatch)
 
             loss = 0.0
             for k, v in losses.items():
                 loss += getattr(self, k + "_coef", 1.0) * v
+
+            action_mean_invalid = bool(getattr(self.actor_critic, "_action_mean_invalid", False))
+            loss_invalid = not torch.isfinite(loss).all()
+            if action_mean_invalid or loss_invalid:
+                num_skipped += 1
+                reason = "non-finite actor mean" if action_mean_invalid else "non-finite loss"
+                print(
+                    f"\033[43;33m[WARN] PPO skip minibatch update ({reason}) "
+                    f"at iter {current_learning_iteration}; "
+                    f"skipped={num_skipped}\033[0m"
+                )
+                continue
+
+            for k, v in losses.items():
                 mean_losses[k] = mean_losses[k] + v.detach()
             mean_losses["total_loss"] = mean_losses["total_loss"] + loss.detach()
             for k, v in stats.items():
@@ -234,12 +250,24 @@ class PPO:
 
             # Gradient step
             self.gradient_step(loss, average_stats)
+            num_updates += 1
 
-        num_updates = self.num_learning_epochs * self.num_mini_batches
-        for k in mean_losses.keys():
-            mean_losses[k] = mean_losses[k] / num_updates
-        for k in average_stats.keys():
-            average_stats[k] = average_stats[k] / num_updates
+        if num_skipped > 0:
+            average_stats["nan_skipped_minibatches"] = torch.tensor(
+                float(num_skipped), device=self.device
+            )
+        if num_updates == 0:
+            print(
+                f"\033[41;37m[ERROR] PPO skipped all minibatches at iter {current_learning_iteration}; "
+                f"weights not updated. Restore a finite checkpoint if this persists.\033[0m"
+            )
+        else:
+            for k in mean_losses.keys():
+                mean_losses[k] = mean_losses[k] / num_updates
+            for k in average_stats.keys():
+                if k == "nan_skipped_minibatches":
+                    continue
+                average_stats[k] = average_stats[k] / num_updates
         self.storage.clear()
         if hasattr(self.actor_critic, "clip_std"):
             self.actor_critic.clip_std(min=self.clip_min_std)
@@ -247,12 +275,21 @@ class PPO:
         return mean_losses, average_stats
 
     def compute_losses(self, minibatch):
+        # Belt-and-suspenders: stored obs may still contain non-finite values from rare physics blowups.
+        obs_clip = 10.0
+        obs = torch.nan_to_num(minibatch.obs, nan=0.0, posinf=obs_clip, neginf=-obs_clip).clamp(-obs_clip, obs_clip)
+        critic_obs = minibatch.critic_obs
+        if critic_obs is not None:
+            critic_obs = torch.nan_to_num(critic_obs, nan=0.0, posinf=obs_clip, neginf=-obs_clip).clamp(
+                -obs_clip, obs_clip
+            )
+
         actor_hidden_states = minibatch.hidden_states.actor if self.actor_critic.is_recurrent else None
-        self.actor_critic.act(minibatch.obs, masks=minibatch.masks, hidden_states=actor_hidden_states)
+        self.actor_critic.act(obs, masks=minibatch.masks, hidden_states=actor_hidden_states)
         actions_log_prob_batch = self.actor_critic.get_actions_log_prob(minibatch.actions)
         critic_hidden_states = minibatch.hidden_states.critic if self.actor_critic.is_recurrent else None
         value_batch = self.actor_critic.evaluate(
-            minibatch.critic_obs, masks=minibatch.masks, hidden_states=critic_hidden_states
+            critic_obs, masks=minibatch.masks, hidden_states=critic_hidden_states
         )
         mu_batch = self.actor_critic.action_mean
         sigma_batch = self.actor_critic.action_std
